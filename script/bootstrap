@@ -1,0 +1,8 @@
+#!/bin/sh
+
+echo "Installing dependencies"
+go get ./...
+
+echo "Installing gometalinter"
+go get -u github.com/alecthomas/gometalinter
+gometalinter --install

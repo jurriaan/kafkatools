@@ -1,0 +1,38 @@
+sudo: required
+dist: trusty
+cache:
+  - bundler
+language: go
+
+go:
+  - 1.7
+
+before_script: script/bootstrap
+
+script: script/test
+
+before_deploy: script/build
+
+deploy:
+  provider: releases
+  api_key:
+    secure: "Se9S81agOroyOuO6NK/4Syf3T92bLwwc166+0XgKUmgrI55q5wVHEID0ZzHLr2zbje3agqO5b8AVN+YTP7CgeV939//0wRZ0UdO+wxJOlhPSvue+7Xl2nbB5cLPEtnU2ZdGWJtlj4XotZmke5jjdqWuw/B/xUX/1pNfKlXwe+H9H8ndrDL8jCyuvGeRc2F21/AlakNC9RftZ+qtRV5YkiqYFXtJ+BrKLr2mSMSFkO1hJTJC4xRnd73evhg26gfVJLJ7mZOBCcUBMDSmbzslD6Nduou7CEC38U8mayOK/TYsny3zVb1OCTwGKvf691uEyIh2+mHFkdc0QNKGdVIDuVOBhOiHtqb6Z8/UockMKbyY7o6p9MsxEsmk+vuzAApmvy3CzvY+78e5J/WJIK6FovFdVbzsssyn95B2yTAbkU0wvqT43ZPLA6E53WpgBh2NlkE604ZHcVXX4svoHoL2m1gEKiExQAYB8+7VWHe01IR49zWWZ2AvCeqtSgfYeUkdSGVvfLC0fsyOJaw17NOi4aqCysL+Dmd6ez8nqyLIQpH25ijISIivoMKiBjcMg6NZVYjs9kfzEhs+MKVnLTmPsPDu6v2vO/LIpXVYSEihDHHn7QyI85Jy6FpRa5WzW70+EQHLEcOFvv9CvBbyVGQ0cUOpCtu1tDqzwwFw/LdgLKIA="
+  file:
+    - output/consumer_offsets_darwin_386
+    - output/consumer_offsets_darwin_amd64
+    - output/consumer_offsets_freebsd_386
+    - output/consumer_offsets_freebsd_amd64
+    - output/consumer_offsets_freebsd_arm
+    - output/consumer_offsets_linux_386
+    - output/consumer_offsets_linux_amd64
+    - output/consumer_offsets_linux_arm
+    - output/consumer_offsets_netbsd_386
+    - output/consumer_offsets_netbsd_amd64
+    - output/consumer_offsets_netbsd_arm
+    - output/consumer_offsets_openbsd_386
+    - output/consumer_offsets_openbsd_amd64
+    - output/consumer_offsets_windows_386.exe
+    - output/consumer_offsets_windows_amd64.exe
+  skip_cleanup: true
+  on:
+    tags: true
