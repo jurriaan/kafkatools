@@ -3,15 +3,18 @@ package main
 import (
 	"fmt"
 	"log"
+	url "net/url"
 	"os"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"strconv"
 
 	"github.com/Shopify/sarama"
 	docopt "github.com/docopt/docopt-go"
+	influxdb "github.com/influxdata/influxdb/client/v2"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -28,6 +31,7 @@ options:
   -h --help          show this screen.
   --version          show version.
   --broker [broker]  the kafka bootstrap broker
+  --influxdb [url]   send the data to influxdb (url format: influxdb://user:pass@host:port/database)
 `
 )
 
@@ -42,6 +46,40 @@ func getSaramaClient(broker string) sarama.Client {
 	}
 
 	return client
+}
+
+func getInfluxClient(urlStr string) (client influxdb.Client, batchConfig influxdb.BatchPointsConfig) {
+	u, err := url.Parse(urlStr)
+	if err != nil || u.Scheme != "influxdb" {
+		log.Fatalf("error parsing url %v: %v", urlStr, err)
+	}
+
+	addr := &url.URL{
+		Host:   u.Host,
+		Scheme: "http",
+		Path:   "",
+	}
+
+	database := u.Path[1:]
+	log.Printf("Connecting to %s, db: %s", addr.String(), database)
+
+	password, _ := u.User.Password()
+	client, err = influxdb.NewHTTPClient(influxdb.HTTPConfig{
+		Addr:     addr.String(),
+		Username: u.User.Username(),
+		Password: password,
+	})
+
+	if err != nil {
+		log.Fatalln("Error: ", err)
+	}
+
+	batchConfig = influxdb.BatchPointsConfig{
+		Database:  database,
+		Precision: "s",
+	}
+
+	return client, batchConfig
 }
 
 func generateOffsetRequests(client sarama.Client) (requests map[*sarama.Broker]*sarama.OffsetRequest) {
@@ -137,7 +175,61 @@ func main() {
 	close(groupOffsetChannel)
 	wg2.Wait()
 
-	printTable(groupOffsets, topicOffsets)
+	if docOpts["--influxdb"] != nil {
+		writeToInflux(docOpts["--influxdb"].(string), groupOffsets, topicOffsets)
+	} else {
+		printTable(groupOffsets, topicOffsets)
+	}
+}
+
+func writeToInflux(url string, groupOffsets groupOffsetSlice, topicOffsets map[string]map[int32]topicPartitionOffset) {
+	client, batchConfig := getInfluxClient(url)
+
+	bp, batchErr := influxdb.NewBatchPoints(batchConfig)
+
+	if batchErr != nil {
+		log.Fatalln("Error: ", batchErr)
+	}
+
+	for _, groupOffset := range groupOffsets {
+		for _, topicOffset := range groupOffset.groupTopicOffsets {
+			for _, partitionOffset := range topicOffset.topicPartitionOffsets {
+				tags := map[string]string{
+					"consumerGroup": groupOffset.group,
+					"topic":         topicOffset.topic,
+					"partition":     strconv.Itoa(int(partitionOffset.partition)),
+				}
+
+				var gOffset, tOffset, lag interface{}
+
+				gOffset = int(partitionOffset.offset)
+				tOffset = int(topicOffsets[topicOffset.topic][partitionOffset.partition].offset)
+				lag = tOffset.(int) - gOffset.(int)
+
+				fields := make(map[string]interface{})
+				fields["partitionOffset"] = tOffset
+				if gOffset.(int) >= 0 {
+					fields["groupOffset"] = gOffset
+					fields["lag"] = lag
+				}
+
+				pt, err := influxdb.NewPoint("consumer_offset", tags, fields, time.Now())
+
+				if err != nil {
+					log.Fatalln("Error: ", err)
+				}
+
+				bp.AddPoint(pt)
+			}
+		}
+	}
+
+	// Write the batch
+	err := client.Write(bp)
+	if err != nil {
+		log.Fatal("Could not write points to influxdb", err)
+	}
+	log.Println("Written points to influxdb")
 }
 
 func printTable(groupOffsets groupOffsetSlice, topicOffsets map[string]map[int32]topicPartitionOffset) {
