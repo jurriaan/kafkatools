@@ -191,6 +191,7 @@ func writeToInflux(url string, groupOffsets groupOffsetSlice, topicOffsets map[s
 		log.Fatalln("Error: ", batchErr)
 	}
 
+	curTime := time.Now()
 	for _, groupOffset := range groupOffsets {
 		for _, topicOffset := range groupOffset.groupTopicOffsets {
 			for _, partitionOffset := range topicOffset.topicPartitionOffsets {
@@ -213,7 +214,7 @@ func writeToInflux(url string, groupOffsets groupOffsetSlice, topicOffsets map[s
 					fields["lag"] = lag
 				}
 
-				pt, err := influxdb.NewPoint("consumer_offset", tags, fields, time.Now())
+				pt, err := influxdb.NewPoint("consumer_offset", tags, fields, curTime)
 
 				if err != nil {
 					log.Fatalln("Error: ", err)
