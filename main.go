@@ -141,6 +141,8 @@ func main() {
 }
 
 func printTable(groupOffsets groupOffsetSlice, topicOffsets map[string]map[int32]topicPartitionOffset) {
+	var totals groupTopicTotalSlice
+
 	for _, groupOffset := range groupOffsets {
 		group := fmt.Sprintf("Group %s:", groupOffset.group)
 		fmt.Println(group)
@@ -170,10 +172,22 @@ func printTable(groupOffsets groupOffsetSlice, topicOffsets map[string]map[int32
 			table.SetAlignment(tablewriter.ALIGN_LEFT)
 			table.SetFooterAlignment(tablewriter.ALIGN_LEFT)
 			table.Render()
+
+			totals = append(totals, groupTopicTotal{group: groupOffset.group, topic: topicOffset.topic, totalLag: totalLag})
 		}
 		fmt.Println("")
 	}
 
+	fmt.Println("TOTALS:")
+	fmt.Println("=======")
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"group", "topic", "total lag"})
+	for _, total := range totals {
+		table.Append([]string{total.group, total.topic, strconv.Itoa(total.totalLag)})
+	}
+
+	table.SetAlignment(tablewriter.ALIGN_LEFT)
+	table.Render()
 }
 
 func getBrokerTopicOffsets(broker *sarama.Broker, request *sarama.OffsetRequest, offsets chan topicPartitionOffset) {

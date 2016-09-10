@@ -15,7 +15,14 @@ type groupOffset struct {
 	groupTopicOffsets groupTopicOffsetSlice
 }
 
+type groupTopicTotal struct {
+	group    string
+	topic    string
+	totalLag int
+}
+
 type groupOffsetSlice []groupOffset
+type groupTopicTotalSlice []groupTopicTotal
 type groupTopicOffsetSlice []groupTopicOffset
 type topicPartitionOffsetSlice []topicPartitionOffset
 
