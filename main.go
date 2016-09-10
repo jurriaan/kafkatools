@@ -17,7 +17,8 @@ import (
 
 var (
 	version     = "0.1"
-	versionInfo = `consumer_offsets v%s`
+	gitref      = "unknown"
+	versionInfo = `consumer_offsets %s (git rev %s)`
 	usage       = `consumer_offsets - A tool for monitoring kafka consumer offsets and lag
 
 usage:
@@ -73,7 +74,7 @@ func generateOffsetRequests(client sarama.Client) (requests map[*sarama.Broker]*
 }
 
 func main() {
-	docOpts, err := docopt.Parse(usage, nil, true, fmt.Sprintf(versionInfo, version), false)
+	docOpts, err := docopt.Parse(usage, nil, true, fmt.Sprintf(versionInfo, version, gitref), false)
 
 	if err != nil {
 		log.Panicf("[PANIC] We couldn't parse doc opts params: %v", err)

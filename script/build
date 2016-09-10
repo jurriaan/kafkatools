@@ -2,6 +2,7 @@
 
 go get github.com/mitchellh/gox
 
+version=$(git describe --abbrev=0 --tags)
 gitrev=$(git rev-parse --short HEAD)
-ldflags='-X main.version=$gitref'
+ldflags="-X \"main.gitref=$gitrev\" -X \"main.version=$version\""
 gox -output "output/consumer_offsets_{{.OS}}_{{.Arch}}" -ldflags="$ldflags"
