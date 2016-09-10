@@ -17,13 +17,6 @@ type memberAssignment struct {
 	assignments []topicAssignment
 }
 
-// func main() {
-//	//	b := []byte{0, 1, 0, 0, 0, 1, 0, 24, 117, 112, 100, 97, 116, 101, 100, 45, 105, 116, 101, 109, 45, 105, 100, 115, 45, 115, 116, 97, 103, 105, 110, 103, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 6, 0, 0, 0, 7, 0, 0, 0, 8, 255, 255, 255, 255}
-//	b := []byte{0, 1, 0, 0, 0, 1, 0, 24, 110, 101, 119, 115, 108, 101, 116, 116, 101, 114, 45, 117, 115, 101, 114, 115, 45, 115, 116, 97, 103, 105, 110, 103, 0, 0, 0, 1, 0, 0, 0, 5, 255, 255, 255, 255}
-//	ass := parseMemberAssignment(b)
-//	log.Println(ass)
-// }
-
 func parseMemberAssignment(byteArr []byte) (assignments memberAssignment) {
 	buf := bytes.NewBuffer(byteArr)
 	assignments.version = int(readInt16(buf))
