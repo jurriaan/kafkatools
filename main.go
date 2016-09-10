@@ -16,9 +16,9 @@ import (
 )
 
 var (
-	version      = "0.1"
-	version_info = `consumer_offsets v%s`
-	usage        = `consumer_offsets - A tool for monitoring kafka consumer offsets and lag
+	version     = "0.1"
+	versionInfo = `consumer_offsets v%s`
+	usage       = `consumer_offsets - A tool for monitoring kafka consumer offsets and lag
 
 usage:
   consumer_offsets [options]
@@ -73,7 +73,7 @@ func generateOffsetRequests(client sarama.Client) (requests map[*sarama.Broker]*
 }
 
 func main() {
-	docOpts, err := docopt.Parse(usage, nil, true, fmt.Sprintf(version_info, version), false)
+	docOpts, err := docopt.Parse(usage, nil, true, fmt.Sprintf(versionInfo, version), false)
 
 	if err != nil {
 		log.Panicf("[PANIC] We couldn't parse doc opts params: %v", err)
@@ -97,7 +97,7 @@ func main() {
 		// Fetch topic offsets (log end)
 		go func(broker *sarama.Broker, request *sarama.OffsetRequest) {
 			defer wg.Done()
-			getBrokerOffsets(broker, request, topicOffsetChannel)
+			getBrokerTopicOffsets(broker, request, topicOffsetChannel)
 		}(broker, request)
 
 		// Fetch group offsets
@@ -175,15 +175,15 @@ func printTable(groupOffsets groupOffsetSlice, topicOffsets map[string]map[int32
 
 }
 
-func getBrokerOffsets(broker *sarama.Broker, request *sarama.OffsetRequest, offsets chan topicPartitionOffset) {
+func getBrokerTopicOffsets(broker *sarama.Broker, request *sarama.OffsetRequest, offsets chan topicPartitionOffset) {
 	response, err := broker.GetAvailableOffsets(request)
 	if err != nil {
-		log.Fatalf("Cannot fetch offsets from broker %v: %v", broker.ID(), err)
+		log.Fatalf("Cannot fetch offsets from broker %d: %v", broker.ID(), err)
 	}
 	for topic, partitions := range response.Blocks {
 		for partition, offsetResponse := range partitions {
 			if offsetResponse.Err != sarama.ErrNoError {
-				log.Printf("Error in OffsetResponse for %s:%v from broker %v: %s", topic, partition, broker.ID(), offsetResponse.Err.Error())
+				log.Printf("Error in OffsetResponse for topic %s:%d from broker %d: %s", topic, partition, broker.ID(), offsetResponse.Err.Error())
 				continue
 			}
 			offsets <- topicPartitionOffset{partition: partition, offset: offsetResponse.Offsets[0], topic: topic}
