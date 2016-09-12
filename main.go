@@ -192,6 +192,19 @@ func writeToInflux(url string, groupOffsets groupOffsetSlice, topicOffsets map[s
 	}
 
 	curTime := time.Now()
+
+	bp = addGroupOffsetPoints(bp, topicOffsets, groupOffsets, curTime)
+	bp = addTopicOffsetPoints(bp, topicOffsets, curTime)
+
+	// Write the batch
+	err := client.Write(bp)
+	if err != nil {
+		log.Fatal("Could not write points to influxdb", err)
+	}
+	log.Println("Written points to influxdb")
+}
+
+func addGroupOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[string]map[int32]topicPartitionOffset, groupOffsets groupOffsetSlice, curTime time.Time) influxdb.BatchPoints {
 	for _, groupOffset := range groupOffsets {
 		for _, topicOffset := range groupOffset.groupTopicOffsets {
 			for _, partitionOffset := range topicOffset.topicPartitionOffsets {
@@ -220,17 +233,35 @@ func writeToInflux(url string, groupOffsets groupOffsetSlice, topicOffsets map[s
 					log.Fatalln("Error: ", err)
 				}
 
-				bp.AddPoint(pt)
+				batchPoints.AddPoint(pt)
 			}
 		}
 	}
+	return batchPoints
+}
 
-	// Write the batch
-	err := client.Write(bp)
-	if err != nil {
-		log.Fatal("Could not write points to influxdb", err)
+func addTopicOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[string]map[int32]topicPartitionOffset, curTime time.Time) influxdb.BatchPoints {
+	for topic, partitionMap := range topicOffsets {
+		for partition, offset := range partitionMap {
+			tags := map[string]string{
+				"topic":     topic,
+				"partition": strconv.Itoa(int(partition)),
+			}
+
+			fields := make(map[string]interface{})
+			fields["partitionOffset"] = int(offset.offset)
+
+			pt, err := influxdb.NewPoint("topic_offset", tags, fields, curTime)
+
+			if err != nil {
+				log.Fatalln("Error: ", err)
+			}
+
+			batchPoints.AddPoint(pt)
+		}
 	}
-	log.Println("Written points to influxdb")
+
+	return batchPoints
 }
 
 func printTable(groupOffsets groupOffsetSlice, topicOffsets map[string]map[int32]topicPartitionOffset) {
