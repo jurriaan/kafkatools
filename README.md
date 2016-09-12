@@ -1,4 +1,4 @@
-# Kafka consumer offsets tool
+# Kafka consumer offsets tool [![Build Status](https://travis-ci.org/jurriaan/consumer_offsets.svg?branch=master)](https://travis-ci.org/jurriaan/consumer_offsets)
 
 Small cli tool for fetching kafka consumer group offsets and lag.
 
