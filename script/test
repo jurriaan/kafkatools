@@ -2,5 +2,6 @@
 
 set -e
 
-gometalinter --deadline=20s
+go install .
+gometalinter --deadline=20s ./...
 go test -v
