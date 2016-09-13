@@ -1,37 +1,39 @@
-package main
+package kafkatools
 
-type topicPartitionOffset struct {
-	topic     string
-	partition int32
-	offset    int64
+// TopicPartitionOffset information
+type TopicPartitionOffset struct {
+	Topic     string
+	Partition int32
+	Offset    int64
 }
 
-type groupTopicOffset struct {
-	topic                 string
-	topicPartitionOffsets topicPartitionOffsetSlice
-}
-type groupOffset struct {
-	group             string
-	groupTopicOffsets groupTopicOffsetSlice
+// GroupTopicOffset contains the partition offset of a topic
+type GroupTopicOffset struct {
+	Topic                 string
+	TopicPartitionOffsets TopicPartitionOffsetSlice
 }
 
-type groupTopicTotal struct {
-	group    string
-	topic    string
-	totalLag int
+// GroupOffset contains the topic offsets for a specific Group
+type GroupOffset struct {
+	Group             string
+	GroupTopicOffsets GroupTopicOffsetSlice
 }
 
-type groupOffsetSlice []groupOffset
-type groupTopicTotalSlice []groupTopicTotal
-type groupTopicOffsetSlice []groupTopicOffset
-type topicPartitionOffsetSlice []topicPartitionOffset
+// GroupOffsetSlice for sorting
+type GroupOffsetSlice []GroupOffset
 
-func (a groupOffsetSlice) Len() int                    { return len(a) }
-func (a groupOffsetSlice) Swap(i, j int)               { a[i], a[j] = a[j], a[i] }
-func (a groupOffsetSlice) Less(i, j int) bool          { return a[i].group < a[j].group }
-func (a groupTopicOffsetSlice) Len() int               { return len(a) }
-func (a groupTopicOffsetSlice) Swap(i, j int)          { a[i], a[j] = a[j], a[i] }
-func (a groupTopicOffsetSlice) Less(i, j int) bool     { return a[i].topic < a[j].topic }
-func (a topicPartitionOffsetSlice) Len() int           { return len(a) }
-func (a topicPartitionOffsetSlice) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a topicPartitionOffsetSlice) Less(i, j int) bool { return a[i].partition < a[j].partition }
+// GroupTopicOffsetSlice for sorting
+type GroupTopicOffsetSlice []GroupTopicOffset
+
+// TopicPartitionOffsetSlice for sorting
+type TopicPartitionOffsetSlice []TopicPartitionOffset
+
+func (a GroupOffsetSlice) Len() int                    { return len(a) }
+func (a GroupOffsetSlice) Swap(i, j int)               { a[i], a[j] = a[j], a[i] }
+func (a GroupOffsetSlice) Less(i, j int) bool          { return a[i].Group < a[j].Group }
+func (a GroupTopicOffsetSlice) Len() int               { return len(a) }
+func (a GroupTopicOffsetSlice) Swap(i, j int)          { a[i], a[j] = a[j], a[i] }
+func (a GroupTopicOffsetSlice) Less(i, j int) bool     { return a[i].Topic < a[j].Topic }
+func (a TopicPartitionOffsetSlice) Len() int           { return len(a) }
+func (a TopicPartitionOffsetSlice) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a TopicPartitionOffsetSlice) Less(i, j int) bool { return a[i].Partition < a[j].Partition }

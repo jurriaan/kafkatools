@@ -1,4 +1,4 @@
-package main
+package kafkatools
 
 import (
 	"bytes"
@@ -7,24 +7,27 @@ import (
 	"log"
 )
 
-type topicAssignment struct {
-	topic      string
-	partitions []int32
+// TopicAssignment contains the assigned partitions of a topic
+type TopicAssignment struct {
+	Topic      string
+	Partitions []int32
 }
 
-type memberAssignment struct {
-	version     int
-	assignments []topicAssignment
+// MemberAssignment contains the assignments of a consumer group member
+type MemberAssignment struct {
+	Version     int
+	Assignments []TopicAssignment
 }
 
-func parseMemberAssignment(byteArr []byte) (assignments memberAssignment) {
+// ParseMemberAssignment parses a binary byteArr
+func ParseMemberAssignment(byteArr []byte) (assignments MemberAssignment) {
 	buf := bytes.NewBuffer(byteArr)
-	assignments.version = int(readInt16(buf))
+	assignments.Version = int(readInt16(buf))
 	elements := int(readInt32(buf))
-	assignments.assignments = make([]topicAssignment, elements)
-	for i := range assignments.assignments {
-		assignments.assignments[i].topic = readString(buf)
-		assignments.assignments[i].partitions = readInt32Arr(buf)
+	assignments.Assignments = make([]TopicAssignment, elements)
+	for i := range assignments.Assignments {
+		assignments.Assignments[i].Topic = readString(buf)
+		assignments.Assignments[i].Partitions = readInt32Arr(buf)
 	}
 
 	return assignments

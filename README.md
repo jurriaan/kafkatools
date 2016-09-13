@@ -1,6 +1,12 @@
-# Kafka consumer offsets tool [![Build Status](https://travis-ci.org/jurriaan/consumer_offsets.svg?branch=master)](https://travis-ci.org/jurriaan/consumer_offsets)
+# Kafka Tools - small cli tools for monitoring and managing [Apache Kafka](http://kafka.apache.org/) [![Build Status](https://travis-ci.org/jurriaan/kafkatools.svg?branch=master)](https://travis-ci.org/jurriaan/kafkatools)
 
-Small cli tool for fetching kafka consumer group offsets and lag.
+## consumer_offsets
+
+CLI tool for fetching kafka consumer group offsets and lag with support for inserting the results into InfluxDB
+
+## reset_consumer_group
+
+Simple CLI tool for resetting the offset of a kafka consumer group
 
 ## License
 

@@ -1,8 +1,21 @@
-#!/bin/sh
+#!/bin/bash
 
 go get github.com/mitchellh/gox
 
+rm -rf output
 version=$(git describe --abbrev=0 --tags)
 gitrev=$(git rev-parse --short HEAD)
 ldflags="-X \"main.gitref=$gitrev\" -X \"main.version=$version\""
-gox -output "output/consumer_offsets_{{.OS}}_{{.Arch}}" -ldflags="$ldflags"
+gox -output "output/kafkatools_{{.OS}}_{{.Arch}}/{{.Dir}}" -ldflags="$ldflags" ./cmd/...
+
+cd output
+
+for file in * ; do
+    if [[ -d "$file" ]]; then
+        tar -czf "$file.tar.gz" "$file"
+        rm -r "$file"
+    fi
+done
+
+echo "Built the following artifacts:"
+ls -lh *.tar.gz
