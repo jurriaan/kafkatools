@@ -21,7 +21,7 @@ import (
 
 var (
 	version     = "0.1"
-	gitref      = "unknown"
+	gitrev      = "unknown"
 	versionInfo = `consumer_offsets %s (git rev %s)`
 	usage       = `consumer_offsets - A tool for monitoring kafka consumer offsets and lag
 
@@ -71,7 +71,7 @@ func getInfluxClient(urlStr string) (client influxdb.Client, batchConfig influxd
 }
 
 func main() {
-	docOpts, err := docopt.Parse(usage, nil, true, fmt.Sprintf(versionInfo, version, gitref), false)
+	docOpts, err := docopt.Parse(usage, nil, true, fmt.Sprintf(versionInfo, version, gitrev), false)
 
 	if err != nil {
 		log.Panicf("[PANIC] We couldn't parse doc opts params: %v", err)
@@ -79,11 +79,28 @@ func main() {
 
 	if docOpts["--broker"] == nil {
 		log.Fatal("You have to provide a broker")
+
 	}
 	broker := docOpts["--broker"].(string)
 
 	client := kafkatools.GetSaramaClient(broker)
 
+	if docOpts["--influxdb"] != nil {
+		influxClient, batchConfig := getInfluxClient(docOpts["--influxdb"].(string))
+
+		ticker := time.NewTicker(time.Second)
+		for _ = range ticker.C {
+			log.Println("Sending metrics to InfluxDB")
+			groupOffsets, topicOffsets := fetchOffsets(client)
+			writeToInflux(influxClient, batchConfig, groupOffsets, topicOffsets)
+		}
+	} else {
+		groupOffsets, topicOffsets := fetchOffsets(client)
+		printTable(groupOffsets, topicOffsets)
+	}
+}
+
+func fetchOffsets(client sarama.Client) (groupOffsets kafkatools.GroupOffsetSlice, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset) {
 	requests := kafkatools.GenerateOffsetRequests(client)
 
 	var wg, wg2 sync.WaitGroup
@@ -106,8 +123,7 @@ func main() {
 	}
 
 	// Setup lookup table for topic offsets
-	topicOffsets := make(map[string]map[int32]kafkatools.TopicPartitionOffset)
-	var groupOffsets kafkatools.GroupOffsetSlice
+	topicOffsets = make(map[string]map[int32]kafkatools.TopicPartitionOffset)
 	go func() {
 		defer wg2.Done()
 		wg2.Add(1)
@@ -134,16 +150,10 @@ func main() {
 	close(groupOffsetChannel)
 	wg2.Wait()
 
-	if docOpts["--influxdb"] != nil {
-		writeToInflux(docOpts["--influxdb"].(string), groupOffsets, topicOffsets)
-	} else {
-		printTable(groupOffsets, topicOffsets)
-	}
+	return
 }
 
-func writeToInflux(url string, groupOffsets kafkatools.GroupOffsetSlice, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset) {
-	client, batchConfig := getInfluxClient(url)
-
+func writeToInflux(client influxdb.Client, batchConfig influxdb.BatchPointsConfig, groupOffsets kafkatools.GroupOffsetSlice, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset) {
 	bp, batchErr := influxdb.NewBatchPoints(batchConfig)
 
 	if batchErr != nil {
@@ -166,6 +176,9 @@ func writeToInflux(url string, groupOffsets kafkatools.GroupOffsetSlice, topicOf
 func addGroupOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset, groupOffsets kafkatools.GroupOffsetSlice, curTime time.Time) influxdb.BatchPoints {
 	for _, groupOffset := range groupOffsets {
 		for _, topicOffset := range groupOffset.GroupTopicOffsets {
+			totalPartitionOffset := 0
+			totalGroupOffset := 0
+			totalLag := 0
 			for _, partitionOffset := range topicOffset.TopicPartitionOffsets {
 				tags := map[string]string{
 					"consumerGroup": groupOffset.Group,
@@ -181,9 +194,12 @@ func addGroupOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[str
 
 				fields := make(map[string]interface{})
 				fields["partitionOffset"] = tOffset
+				totalPartitionOffset += tOffset.(int)
 				if gOffset.(int) >= 0 {
 					fields["groupOffset"] = gOffset
+					totalGroupOffset += gOffset.(int)
 					fields["lag"] = lag
+					totalLag += lag.(int)
 				}
 
 				pt, err := influxdb.NewPoint("consumer_offset", tags, fields, curTime)
@@ -194,6 +210,26 @@ func addGroupOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[str
 
 				batchPoints.AddPoint(pt)
 			}
+
+			tags := map[string]string{
+				"consumerGroup": groupOffset.Group,
+				"topic":         topicOffset.Topic,
+				"partition":     "*",
+			}
+
+			fields := map[string]interface{}{
+				"lag":             totalLag,
+				"groupOffset":     totalGroupOffset,
+				"partitionOffset": totalPartitionOffset,
+			}
+
+			pt, err := influxdb.NewPoint("consumer_offset", tags, fields, curTime)
+
+			if err != nil {
+				log.Fatalln("Error: ", err)
+			}
+
+			batchPoints.AddPoint(pt)
 		}
 	}
 	return batchPoints
@@ -201,6 +237,7 @@ func addGroupOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[str
 
 func addTopicOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset, curTime time.Time) influxdb.BatchPoints {
 	for topic, partitionMap := range topicOffsets {
+		var totalOffset int64
 		for partition, offset := range partitionMap {
 			tags := map[string]string{
 				"topic":     topic,
@@ -210,6 +247,8 @@ func addTopicOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[str
 			fields := make(map[string]interface{})
 			fields["partitionOffset"] = int(offset.Offset)
 
+			totalOffset += offset.Offset
+
 			pt, err := influxdb.NewPoint("topic_offset", tags, fields, curTime)
 
 			if err != nil {
@@ -218,6 +257,23 @@ func addTopicOffsetPoints(batchPoints influxdb.BatchPoints, topicOffsets map[str
 
 			batchPoints.AddPoint(pt)
 		}
+
+		tags := map[string]string{
+			"topic":     topic,
+			"partition": "*",
+		}
+
+		fields := map[string]interface{}{
+			"partitionOffset": totalOffset,
+		}
+
+		pt, err := influxdb.NewPoint("topic_offset", tags, fields, curTime)
+
+		if err != nil {
+			log.Fatalln("Error: ", err)
+		}
+
+		batchPoints.AddPoint(pt)
 	}
 
 	return batchPoints

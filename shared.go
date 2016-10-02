@@ -3,6 +3,7 @@ package kafkatools
 import (
 	"log"
 	"strings"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
@@ -13,6 +14,10 @@ func GetSaramaClient(brokers string) sarama.Client {
 	config := sarama.NewConfig()
 	config.Version = sarama.V0_10_0_0
 	config.Consumer.Return.Errors = true
+	config.Metadata.RefreshFrequency = 1 * time.Minute
+	config.Metadata.Retry.Max = 10
+	config.Net.MaxOpenRequests = 10
+
 	client, err := sarama.NewClient(strings.Split(brokers, ","), config)
 
 	if err != nil {

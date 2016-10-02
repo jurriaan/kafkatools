@@ -16,7 +16,7 @@ import (
 
 var (
 	version     = "0.1"
-	gitref      = "unknown"
+	gitrev      = "unknown"
 	versionInfo = `reset_consumer_group %s (git rev %s)`
 	usage       = `reset_consumer_group - a tool to reset the consumer group offset for a specific topic
 
@@ -31,7 +31,7 @@ options:
 )
 
 func main() {
-	docOpts, err := docopt.Parse(usage, nil, true, fmt.Sprintf(versionInfo, version, gitref), false)
+	docOpts, err := docopt.Parse(usage, nil, true, fmt.Sprintf(versionInfo, version, gitrev), false)
 
 	if err != nil {
 		log.Panicf("[PANIC] We couldn't parse doc opts params: %v", err)

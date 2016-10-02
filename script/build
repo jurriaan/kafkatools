@@ -5,7 +5,7 @@ go get github.com/mitchellh/gox
 rm -rf output
 version=$(git describe --abbrev=0 --tags)
 gitrev=$(git rev-parse --short HEAD)
-ldflags="-X \"main.gitref=$gitrev\" -X \"main.version=$version\""
+ldflags="-X \"main.gitrev=$gitrev\" -X \"main.version=$version\""
 gox -output "output/kafkatools_{{.OS}}_{{.Arch}}/{{.Dir}}" -ldflags="$ldflags" ./cmd/...
 
 cd output
