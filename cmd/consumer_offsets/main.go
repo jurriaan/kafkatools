@@ -89,7 +89,7 @@ func main() {
 		influxClient, batchConfig := getInfluxClient(docOpts["--influxdb"].(string))
 
 		ticker := time.NewTicker(time.Second)
-		for _ = range ticker.C {
+		for range ticker.C {
 			log.Println("Sending metrics to InfluxDB")
 			groupOffsets, topicOffsets := fetchOffsets(client)
 			writeToInflux(influxClient, batchConfig, groupOffsets, topicOffsets)
