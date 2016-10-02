@@ -6,8 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	"os"
-
 	"github.com/Shopify/sarama"
 	cluster "github.com/bsm/sarama-cluster"
 	docopt "github.com/docopt/docopt-go"
@@ -51,6 +49,11 @@ func main() {
 		if err != nil {
 			log.Fatal("Could not properly close the consumer")
 		}
+		err = client.Close()
+		if err != nil {
+			log.Fatal("Could not properly close the client")
+		}
+		log.Println("Connection closed. Bye.")
 	}()
 
 	requests := kafkatools.GenerateOffsetRequests(client)
@@ -125,7 +128,7 @@ func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffset
 		}
 
 		log.Println("Quitting")
-		os.Exit(0)
+		return
 	}
 
 }
