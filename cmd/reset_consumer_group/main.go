@@ -118,7 +118,7 @@ func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffset
 			topicPartitionOffset := topicOffsets[topic]
 			for partition, offset := range topicPartitionOffset {
 				log.Printf("Setting %s:%d's offset to %d", topic, partition, offset.Offset)
-				consumer.MarkPartitionOffset(topic, partition, offset.Offset, "")
+				consumer.MarkPartitionOffset(topic, partition, offset.Offset-1, "")
 			}
 		}
 
