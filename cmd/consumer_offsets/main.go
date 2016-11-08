@@ -5,17 +5,15 @@ import (
 	"log"
 	url "net/url"
 	"os"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"strconv"
 
-	"github.com/Shopify/sarama"
 	docopt "github.com/docopt/docopt-go"
 	influxdb "github.com/influxdata/influxdb/client/v2"
 	"github.com/jurriaan/kafkatools"
+	"github.com/jurriaan/sarama"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -29,10 +27,11 @@ usage:
   consumer_offsets [options]
 
 options:
-  -h --help          show this screen.
-  --version          show version.
-  --broker [broker]  the kafka bootstrap broker
-  --influxdb [url]   send the data to influxdb (url format: influxdb://user:pass@host:port/database)
+  -h --help             show this screen.
+  --version             show version.
+  --broker [broker]     the kafka bootstrap broker
+  --at-time [timestamp] fetch offsets at a specific timestamp
+  --influxdb [url]      send the data to influxdb (url format: influxdb://user:pass@host:port/database)
 `
 )
 
@@ -91,66 +90,24 @@ func main() {
 		ticker := time.NewTicker(time.Second)
 		for range ticker.C {
 			log.Println("Sending metrics to InfluxDB")
-			groupOffsets, topicOffsets := fetchOffsets(client)
+			groupOffsets, topicOffsets := kafkatools.FetchOffsets(client, sarama.OffsetNewest)
 			writeToInflux(influxClient, batchConfig, groupOffsets, topicOffsets)
 		}
 	} else {
-		groupOffsets, topicOffsets := fetchOffsets(client)
+		offset := sarama.OffsetNewest
+
+		if docOpts["--at-time"] != nil {
+			atTime, err := time.Parse(time.RFC3339, docOpts["--at-time"].(string))
+			if err != nil {
+				log.Fatal("Invalid time format specified (RFC3339 required): ", err)
+			}
+
+			// Compute time in milliseconds
+			offset = atTime.UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
+		}
+		groupOffsets, topicOffsets := kafkatools.FetchOffsets(client, offset)
 		printTable(groupOffsets, topicOffsets)
 	}
-}
-
-func fetchOffsets(client sarama.Client) (groupOffsets kafkatools.GroupOffsetSlice, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset) {
-	requests := kafkatools.GenerateOffsetRequests(client)
-
-	var wg, wg2 sync.WaitGroup
-	topicOffsetChannel := make(chan kafkatools.TopicPartitionOffset, 20)
-	groupOffsetChannel := make(chan kafkatools.GroupOffset, 10)
-
-	wg.Add(2 * len(requests))
-	for broker, request := range requests {
-		// Fetch topic offsets (log end)
-		go func(broker *sarama.Broker, request *sarama.OffsetRequest) {
-			defer wg.Done()
-			kafkatools.GetBrokerTopicOffsets(broker, request, topicOffsetChannel)
-		}(broker, request)
-
-		// Fetch group offsets
-		go func(broker *sarama.Broker) {
-			defer wg.Done()
-			getBrokerGroupOffsets(broker, groupOffsetChannel)
-		}(broker)
-	}
-
-	// Setup lookup table for topic offsets
-	topicOffsets = make(map[string]map[int32]kafkatools.TopicPartitionOffset)
-	go func() {
-		defer wg2.Done()
-		wg2.Add(1)
-		for topicOffset := range topicOffsetChannel {
-			if _, ok := topicOffsets[topicOffset.Topic]; !ok {
-				topicOffsets[topicOffset.Topic] = make(map[int32]kafkatools.TopicPartitionOffset)
-			}
-			topicOffsets[topicOffset.Topic][topicOffset.Partition] = topicOffset
-		}
-	}()
-
-	go func() {
-		defer wg2.Done()
-		wg2.Add(1)
-		for offset := range groupOffsetChannel {
-			groupOffsets = append(groupOffsets, offset)
-		}
-		sort.Sort(groupOffsets)
-	}()
-
-	// wait for goroutines to finish
-	wg.Wait()
-	close(topicOffsetChannel)
-	close(groupOffsetChannel)
-	wg2.Wait()
-
-	return
 }
 
 func writeToInflux(client influxdb.Client, batchConfig influxdb.BatchPointsConfig, groupOffsets kafkatools.GroupOffsetSlice, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset) {
@@ -333,73 +290,4 @@ func printTable(groupOffsets kafkatools.GroupOffsetSlice, topicOffsets map[strin
 
 	table.SetAlignment(tablewriter.ALIGN_LEFT)
 	table.Render()
-}
-
-func getBrokerGroupOffsets(broker *sarama.Broker, groupOffsetChannel chan kafkatools.GroupOffset) {
-	groupsResponse, err := broker.ListGroups(&sarama.ListGroupsRequest{})
-	if err != nil {
-		log.Fatal("Failed to list groups: ", err)
-	}
-	var groups []string
-	for group := range groupsResponse.Groups {
-		groups = append(groups, group)
-	}
-	groupsDesc, err := broker.DescribeGroups(&sarama.DescribeGroupsRequest{Groups: groups})
-	if err != nil {
-		log.Fatal("Failed to describe groups: ", err)
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(len(groupsDesc.Groups))
-
-	for _, desc := range groupsDesc.Groups {
-		go func(desc *sarama.GroupDescription) {
-			defer wg.Done()
-			var offset kafkatools.GroupOffset
-			offset.Group = desc.GroupId
-
-			request := getOffsetFetchRequest(desc)
-
-			offsets, err := broker.FetchOffset(request)
-			if err != nil {
-				log.Fatal("Failed to fetch offsets")
-			}
-
-			for topic, partitionmap := range offsets.Blocks {
-				groupTopic := kafkatools.GroupTopicOffset{Topic: topic}
-				for partition, block := range partitionmap {
-					topicPartition := kafkatools.TopicPartitionOffset{Partition: partition, Offset: block.Offset, Topic: topic}
-					groupTopic.TopicPartitionOffsets = append(groupTopic.TopicPartitionOffsets, topicPartition)
-				}
-				sort.Sort(groupTopic.TopicPartitionOffsets)
-				offset.GroupTopicOffsets = append(offset.GroupTopicOffsets, groupTopic)
-			}
-
-			sort.Sort(offset.GroupTopicOffsets)
-			groupOffsetChannel <- offset
-		}(desc)
-	}
-	wg.Wait()
-}
-
-func getOffsetFetchRequest(desc *sarama.GroupDescription) *sarama.OffsetFetchRequest {
-	request := new(sarama.OffsetFetchRequest)
-	request.Version = 1
-	request.ConsumerGroup = desc.GroupId
-
-	for _, memberDesc := range desc.Members {
-		assignArr := memberDesc.MemberAssignment
-		if len(assignArr) == 0 {
-			continue
-		}
-
-		assignment := kafkatools.ParseMemberAssignment(assignArr)
-		for _, topicAssignment := range assignment.Assignments {
-			for _, partition := range topicAssignment.Partitions {
-				request.AddPartition(topicAssignment.Topic, partition)
-			}
-		}
-	}
-
-	return request
 }

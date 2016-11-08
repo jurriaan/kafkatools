@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
+	"time"
 
-	"github.com/Shopify/sarama"
 	cluster "github.com/bsm/sarama-cluster"
 	docopt "github.com/docopt/docopt-go"
 	"github.com/jurriaan/kafkatools"
+	"github.com/jurriaan/sarama"
 )
 
 var (
@@ -22,9 +22,10 @@ usage:
   reset_consumer_group [options] <group> <topic>
 
 options:
-  -h --help          show this screen.
-  --version          show version.
-  --broker [broker]  the kafka bootstrap broker
+  -h --help             show this screen.
+  --version             show version.
+  --broker [broker]     the kafka bootstrap broker
+  --to-time [timestamp] set offsets to a specific timestamp
 `
 )
 
@@ -56,38 +57,17 @@ func main() {
 		log.Println("Connection closed. Bye.")
 	}()
 
-	requests := kafkatools.GenerateOffsetRequests(client)
-
-	var wg, wg2 sync.WaitGroup
-	topicOffsetChannel := make(chan kafkatools.TopicPartitionOffset, 20)
-
-	wg.Add(len(requests))
-	for broker, request := range requests {
-		// Fetch topic offsets (log end)
-		go func(broker *sarama.Broker, request *sarama.OffsetRequest) {
-			defer wg.Done()
-			kafkatools.GetBrokerTopicOffsets(broker, request, topicOffsetChannel)
-		}(broker, request)
-	}
-
-	// Setup lookup table for topic offsets
-	topicOffsets := make(map[string]map[int32]kafkatools.TopicPartitionOffset)
-	go func() {
-		defer wg2.Done()
-		wg2.Add(1)
-		for topicOffset := range topicOffsetChannel {
-			if _, ok := topicOffsets[topicOffset.Topic]; !ok {
-				topicOffsets[topicOffset.Topic] = make(map[int32]kafkatools.TopicPartitionOffset)
-			}
-			topicOffsets[topicOffset.Topic][topicOffset.Partition] = topicOffset
+	offset := sarama.OffsetNewest
+	if docOpts["--to-time"] != nil {
+		atTime, err := time.Parse(time.RFC3339, docOpts["--to-time"].(string))
+		if err != nil {
+			log.Fatal("Invalid time format specified (RFC3339 required): ", err)
 		}
-	}()
 
-	// wait for goroutines to finish
-	wg.Wait()
-	close(topicOffsetChannel)
-	wg2.Wait()
-	// Init consumer, consume errors & messages
+		// Compute time in milliseconds
+		offset = atTime.UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
+	}
+	groupOffsets, topicOffsets := kafkatools.FetchOffsets(client, offset)
 
 	go func() {
 		for err := range consumer.Errors() {
@@ -95,10 +75,27 @@ func main() {
 		}
 	}()
 
-	setConsumerOffsets(consumer, topics, topicOffsets)
+	groupOffsetMap := make(map[string]map[int32]int64)
+	for _, groupOffset := range groupOffsets {
+		if groupOffset.Group == consumerGroup {
+			for _, topicOffset := range groupOffset.GroupTopicOffsets {
+				for _, topic := range topics {
+					if topicOffset.Topic == topic {
+						for _, partitionOffset := range topicOffset.TopicPartitionOffsets {
+							if _, ok := groupOffsetMap[partitionOffset.Topic]; !ok {
+								groupOffsetMap[partitionOffset.Topic] = make(map[int32]int64)
+							}
+							groupOffsetMap[partitionOffset.Topic][partitionOffset.Partition] = partitionOffset.Offset
+						}
+					}
+				}
+			}
+		}
+	}
+	setConsumerOffsets(consumer, topics, topicOffsets, groupOffsetMap)
 }
 
-func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset) {
+func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset, groupOffsetMap map[string]map[int32]int64) {
 	log.Println("Waiting for consumer to join all partitions")
 	log.Println("Make sure there are no other consumers listening for this to work")
 
@@ -117,7 +114,7 @@ func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffset
 		for _, topic := range topics {
 			topicPartitionOffset := topicOffsets[topic]
 			for partition, offset := range topicPartitionOffset {
-				log.Printf("Setting %s:%d's offset to %d", topic, partition, offset.Offset)
+				log.Printf("Setting %s:%d's offset from %d to %d", topic, partition, groupOffsetMap[topic][partition], offset.Offset)
 				consumer.MarkPartitionOffset(topic, partition, offset.Offset-1, "")
 			}
 		}

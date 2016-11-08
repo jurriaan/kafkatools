@@ -6,7 +6,7 @@ rm -rf output
 version=$(git describe --abbrev=0 --tags)
 gitrev=$(git rev-parse --short HEAD)
 ldflags="-X \"main.gitrev=$gitrev\" -X \"main.version=$version\" -s -w -extldflags -static"
-CGO_ENABLED=0 gox -output "output/kafkatools_{{.OS}}_{{.Arch}}/{{.Dir}}" -ldflags="$ldflags" ./cmd/...
+CGO_ENABLED=0 gox -output "output/kafkatools_{{.OS}}_{{.Arch}}/{{.Dir}}" -os="linux" -arch="amd64" -ldflags="$ldflags" ./cmd/...
 
 cd output
 

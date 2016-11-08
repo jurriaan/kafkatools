@@ -2,17 +2,19 @@ package kafkatools
 
 import (
 	"log"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
+	"github.com/jurriaan/sarama"
 )
 
 // GetSaramaClient sets up a kafka client
 func GetSaramaClient(brokers string) sarama.Client {
 	config := sarama.NewConfig()
-	config.Version = sarama.V0_10_0_0
+	config.Version = sarama.V0_10_1_0
 	config.Consumer.Return.Errors = true
 	config.Metadata.RefreshFrequency = 1 * time.Minute
 	config.Metadata.Retry.Max = 10
@@ -35,7 +37,7 @@ func GetSaramaConsumer(brokers string, consumerGroup string, topics []string) *c
 	config.Group.Return.Notifications = true
 
 	config.Consumer.Offsets.Initial = sarama.OffsetNewest
-	config.Version = sarama.V0_10_0_0
+	config.Version = sarama.V0_10_1_0
 
 	consumer, err := cluster.NewConsumer(strings.Split(brokers, ","), consumerGroup, topics, config)
 	if err != nil {
@@ -46,7 +48,7 @@ func GetSaramaConsumer(brokers string, consumerGroup string, topics []string) *c
 }
 
 // GenerateOffsetRequests generates the offset requests which can be used in the GetBrokerTopicOffsets function
-func GenerateOffsetRequests(client sarama.Client) (requests map[*sarama.Broker]*sarama.OffsetRequest) {
+func GenerateOffsetRequests(client sarama.Client, time int64) (requests map[*sarama.Broker]*sarama.OffsetRequest) {
 	requests = make(map[*sarama.Broker]*sarama.OffsetRequest)
 
 	topics, err := client.Topics()
@@ -65,10 +67,10 @@ func GenerateOffsetRequests(client sarama.Client) (requests map[*sarama.Broker]*
 			}
 
 			if _, ok := requests[broker]; !ok {
-				requests[broker] = &sarama.OffsetRequest{}
+				requests[broker] = &sarama.OffsetRequest{Version: 1}
 			}
 
-			requests[broker].AddBlock(topic, partition, sarama.OffsetNewest, 1)
+			requests[broker].AddBlock(topic, partition, time, 1)
 		}
 	}
 
@@ -87,11 +89,136 @@ func GetBrokerTopicOffsets(broker *sarama.Broker, request *sarama.OffsetRequest,
 				log.Printf("Error in OffsetResponse for topic %s:%d from broker %d: %s", topic, partition, broker.ID(), offsetResponse.Err.Error())
 				continue
 			}
-			offsets <- TopicPartitionOffset{
-				Partition: partition,
-				Offset:    offsetResponse.Offsets[0],
-				Topic:     topic,
+			if len(offsetResponse.Offsets) == 1 {
+				offsets <- TopicPartitionOffset{
+					Partition: partition,
+					Offset:    offsetResponse.Offset,
+					Topic:     topic,
+				}
 			}
 		}
 	}
+}
+
+// FetchOffsets fetches group and topic offsets (where the topic offset can be sarama.OffsetNewest/OffsetOldest or the time in milliseconds)
+func FetchOffsets(client sarama.Client, offset int64) (groupOffsets GroupOffsetSlice, topicOffsets map[string]map[int32]TopicPartitionOffset) {
+	requests := GenerateOffsetRequests(client, offset)
+
+	var wg, wg2 sync.WaitGroup
+	topicOffsetChannel := make(chan TopicPartitionOffset, 20)
+	groupOffsetChannel := make(chan GroupOffset, 10)
+
+	wg.Add(2 * len(requests))
+	for broker, request := range requests {
+		// Fetch topic offsets (log end)
+		go func(broker *sarama.Broker, request *sarama.OffsetRequest) {
+			defer wg.Done()
+			GetBrokerTopicOffsets(broker, request, topicOffsetChannel)
+		}(broker, request)
+
+		// Fetch group offsets
+		go func(broker *sarama.Broker) {
+			defer wg.Done()
+			GetBrokerGroupOffsets(broker, groupOffsetChannel)
+		}(broker)
+	}
+
+	// Setup lookup table for topic offsets
+	topicOffsets = make(map[string]map[int32]TopicPartitionOffset)
+	go func() {
+		defer wg2.Done()
+		wg2.Add(1)
+		for topicOffset := range topicOffsetChannel {
+			if _, ok := topicOffsets[topicOffset.Topic]; !ok {
+				topicOffsets[topicOffset.Topic] = make(map[int32]TopicPartitionOffset)
+			}
+			topicOffsets[topicOffset.Topic][topicOffset.Partition] = topicOffset
+		}
+	}()
+
+	go func() {
+		defer wg2.Done()
+		wg2.Add(1)
+		for offset := range groupOffsetChannel {
+			groupOffsets = append(groupOffsets, offset)
+		}
+		sort.Sort(groupOffsets)
+	}()
+
+	// wait for goroutines to finish
+	wg.Wait()
+	close(topicOffsetChannel)
+	close(groupOffsetChannel)
+	wg2.Wait()
+
+	return
+}
+
+func GetBrokerGroupOffsets(broker *sarama.Broker, groupOffsetChannel chan GroupOffset) {
+	groupsResponse, err := broker.ListGroups(&sarama.ListGroupsRequest{})
+	if err != nil {
+		log.Fatal("Failed to list groups: ", err)
+	}
+	var groups []string
+	for group := range groupsResponse.Groups {
+		groups = append(groups, group)
+	}
+	groupsDesc, err := broker.DescribeGroups(&sarama.DescribeGroupsRequest{Groups: groups})
+	if err != nil {
+		log.Fatal("Failed to describe groups: ", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(groupsDesc.Groups))
+
+	for _, desc := range groupsDesc.Groups {
+		go func(desc *sarama.GroupDescription) {
+			defer wg.Done()
+			var offset GroupOffset
+			offset.Group = desc.GroupId
+
+			request := GetOffsetFetchRequest(desc)
+
+			offsets, err := broker.FetchOffset(request)
+			if err != nil {
+				log.Fatal("Failed to fetch offsets")
+			}
+
+			for topic, partitionmap := range offsets.Blocks {
+				groupTopic := GroupTopicOffset{Topic: topic}
+				for partition, block := range partitionmap {
+					topicPartition := TopicPartitionOffset{Partition: partition, Offset: block.Offset, Topic: topic}
+					groupTopic.TopicPartitionOffsets = append(groupTopic.TopicPartitionOffsets, topicPartition)
+				}
+				sort.Sort(groupTopic.TopicPartitionOffsets)
+				offset.GroupTopicOffsets = append(offset.GroupTopicOffsets, groupTopic)
+			}
+
+			sort.Sort(offset.GroupTopicOffsets)
+			groupOffsetChannel <- offset
+		}(desc)
+	}
+	wg.Wait()
+}
+
+func GetOffsetFetchRequest(desc *sarama.GroupDescription) *sarama.OffsetFetchRequest {
+	request := new(sarama.OffsetFetchRequest)
+	request.Version = 1
+	request.ConsumerGroup = desc.GroupId
+
+	for _, memberDesc := range desc.Members {
+		assignArr := memberDesc.MemberAssignment
+		if len(assignArr) == 0 {
+			continue
+		}
+
+		assignment := ParseMemberAssignment(assignArr)
+		for _, topicAssignment := range assignment.Assignments {
+			for _, partition := range topicAssignment.Partitions {
+				request.AddPartition(topicAssignment.Topic, partition)
+			}
+		}
+	}
+
+	return request
 }
