@@ -10,10 +10,10 @@ import (
 
 	"strconv"
 
+	"github.com/Shopify/sarama"
 	docopt "github.com/docopt/docopt-go"
 	influxdb "github.com/influxdata/influxdb/client/v2"
 	"github.com/jurriaan/kafkatools"
-	"github.com/jurriaan/sarama"
 	"github.com/olekukonko/tablewriter"
 )
 

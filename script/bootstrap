@@ -1,8 +1,16 @@
 #!/bin/sh
 
+echo "Use fixed sarama branch"
+go get github.com/Shopify/sarama
+cd $GOPATH/src/github.com/Shopify/sarama
+git remote add jurriaan git@github.com:jurriaan/sarama.git
+git checkout jurriaan/master
+cd -
+
 echo "Installing dependencies"
 go get ./...
 
 echo "Installing gometalinter"
 go get -u github.com/alecthomas/gometalinter
 gometalinter --install
+

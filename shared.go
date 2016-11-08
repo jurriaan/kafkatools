@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
-	"github.com/jurriaan/sarama"
 )
 
 // GetSaramaClient sets up a kafka client

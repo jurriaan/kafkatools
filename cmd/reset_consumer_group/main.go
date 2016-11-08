@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Shopify/sarama"
 	cluster "github.com/bsm/sarama-cluster"
 	docopt "github.com/docopt/docopt-go"
 	"github.com/jurriaan/kafkatools"
-	"github.com/jurriaan/sarama"
 )
 
 var (
