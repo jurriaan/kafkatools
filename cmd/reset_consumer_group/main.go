@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +26,9 @@ options:
   -h --help             show this screen.
   --version             show version.
   --broker [broker]     the kafka bootstrap broker
-  --to-time [timestamp] set offsets to a specific timestamp
+  --to-time [timestamp]   set offsets to a specific timestamp
+  --partition [partition] only update a specific partition
+  --offset [offset] update to a certain offset
 `
 )
 
@@ -42,6 +45,7 @@ func main() {
 	broker := docOpts["--broker"].(string)
 	topics := strings.Split(docOpts["<topic>"].(string), ",")
 	consumerGroup := docOpts["<group>"].(string)
+	partition := getPartition(docOpts)
 
 	client := kafkatools.GetSaramaClient(broker)
 	consumer := kafkatools.GetSaramaConsumer(broker, consumerGroup, topics)
@@ -57,16 +61,7 @@ func main() {
 		log.Println("Connection closed. Bye.")
 	}()
 
-	offset := sarama.OffsetNewest
-	if docOpts["--to-time"] != nil {
-		atTime, err := time.Parse(time.RFC3339, docOpts["--to-time"].(string))
-		if err != nil {
-			log.Fatal("Invalid time format specified (RFC3339 required): ", err)
-		}
-
-		// Compute time in milliseconds
-		offset = atTime.UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
-	}
+	offset := getOffset(docOpts)
 	groupOffsets, topicOffsets := kafkatools.FetchOffsets(client, offset)
 
 	go func() {
@@ -76,7 +71,39 @@ func main() {
 	}()
 
 	groupOffsetMap := generateGroupOffsetMap(groupOffsets, topics, consumerGroup)
-	setConsumerOffsets(consumer, topics, topicOffsets, groupOffsetMap)
+	setConsumerOffsets(consumer, topics, topicOffsets, groupOffsetMap, partition, offset)
+}
+
+func getPartition(docOpts map[string]interface{}) int32 {
+	if docOpts["--partition"] == nil {
+		return int32(-1)
+	}
+
+	r, err := strconv.Atoi(docOpts["--partition"].(string))
+	if err != nil {
+		log.Fatal("Couldn't parse partition", err)
+	}
+	return int32(r)
+}
+
+func getOffset(docOpts map[string]interface{}) int64 {
+	if docOpts["--to-time"] != nil {
+		atTime, err := time.Parse(time.RFC3339, docOpts["--to-time"].(string))
+		if err != nil {
+			log.Fatal("Invalid time format specified (RFC3339 required): ", err)
+		}
+
+		// Compute time in milliseconds
+		return atTime.UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
+	} else if docOpts["--offset"] != nil {
+		r, err := strconv.Atoi(docOpts["--offset"].(string))
+		if err != nil {
+			log.Fatal("Couldn't parse offset", err)
+		}
+		return int64(r)
+	}
+
+	return sarama.OffsetNewest
 }
 
 func generateGroupOffsetMap(groupOffsets kafkatools.GroupOffsetSlice, topics []string, consumerGroup string) (groupOffsetMap map[string]map[int32]int64) {
@@ -99,7 +126,8 @@ func generateGroupOffsetMap(groupOffsets kafkatools.GroupOffsetSlice, topics []s
 	}
 	return
 }
-func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset, groupOffsetMap map[string]map[int32]int64) {
+
+func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset, groupOffsetMap map[string]map[int32]int64, providedPartition int32, providedOffset int64) {
 	log.Println("Waiting for consumer to join all partitions")
 	log.Println("Make sure there are no other consumers listening for this to work")
 
@@ -117,9 +145,18 @@ func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffset
 
 		for _, topic := range topics {
 			topicPartitionOffset := topicOffsets[topic]
-			for partition, offset := range topicPartitionOffset {
-				log.Printf("Setting %s:%d's offset from %d to %d", topic, partition, groupOffsetMap[topic][partition], offset.Offset)
-				consumer.MarkPartitionOffset(topic, partition, offset.Offset-1, "")
+			if providedPartition != -1 {
+				if providedOffset == -1 {
+					providedOffset = topicPartitionOffset[providedPartition].Offset
+				}
+
+				log.Printf("Setting %s:%d's offset from %d to %d", topic, providedPartition, groupOffsetMap[topic][providedPartition], providedOffset)
+				consumer.MarkPartitionOffset(topic, providedPartition, providedOffset-1, "")
+			} else {
+				for partition, offset := range topicPartitionOffset {
+					log.Printf("Setting %s:%d's offset from %d to %d", topic, partition, groupOffsetMap[topic][partition], offset.Offset)
+					consumer.MarkPartitionOffset(topic, partition, offset.Offset-1, "")
+				}
 			}
 		}
 
