@@ -45,14 +45,7 @@ func main() {
 	broker := docOpts["--broker"].(string)
 	topics := strings.Split(docOpts["<topic>"].(string), ",")
 	consumerGroup := docOpts["<group>"].(string)
-	partition := int32(-1)
-	if docOpts["--partition"] != nil {
-		r, err := strconv.Atoi(docOpts["--partition"].(string))
-		if err != nil {
-			log.Fatal("Couldn't parse partition", err)
-		}
-		partition = int32(r)
-	}
+	partition := getPartition(docOpts)
 
 	client := kafkatools.GetSaramaClient(broker)
 	consumer := kafkatools.GetSaramaConsumer(broker, consumerGroup, topics)
@@ -68,22 +61,7 @@ func main() {
 		log.Println("Connection closed. Bye.")
 	}()
 
-	offset := sarama.OffsetNewest
-	if docOpts["--to-time"] != nil {
-		atTime, err := time.Parse(time.RFC3339, docOpts["--to-time"].(string))
-		if err != nil {
-			log.Fatal("Invalid time format specified (RFC3339 required): ", err)
-		}
-
-		// Compute time in milliseconds
-		offset = atTime.UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
-	} else if docOpts["--offset"] != nil {
-		r, err := strconv.Atoi(docOpts["--offset"].(string))
-		if err != nil {
-			log.Fatal("Couldn't parse offset", err)
-		}
-		offset = int64(r)
-	}
+	offset := getOffset(docOpts)
 	groupOffsets, topicOffsets := kafkatools.FetchOffsets(client, offset)
 
 	go func() {
@@ -94,6 +72,38 @@ func main() {
 
 	groupOffsetMap := generateGroupOffsetMap(groupOffsets, topics, consumerGroup)
 	setConsumerOffsets(consumer, topics, topicOffsets, groupOffsetMap, partition, offset)
+}
+
+func getPartition(docOpts map[string]interface{}) int32 {
+	if docOpts["--partition"] == nil {
+		return int32(-1)
+	}
+
+	r, err := strconv.Atoi(docOpts["--partition"].(string))
+	if err != nil {
+		log.Fatal("Couldn't parse partition", err)
+	}
+	return int32(r)
+}
+
+func getOffset(docOpts map[string]interface{}) int64 {
+	if docOpts["--to-time"] != nil {
+		atTime, err := time.Parse(time.RFC3339, docOpts["--to-time"].(string))
+		if err != nil {
+			log.Fatal("Invalid time format specified (RFC3339 required): ", err)
+		}
+
+		// Compute time in milliseconds
+		return atTime.UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
+	} else if docOpts["--offset"] != nil {
+		r, err := strconv.Atoi(docOpts["--offset"].(string))
+		if err != nil {
+			log.Fatal("Couldn't parse offset", err)
+		}
+		return int64(r)
+	}
+
+	return sarama.OffsetNewest
 }
 
 func generateGroupOffsetMap(groupOffsets kafkatools.GroupOffsetSlice, topics []string, consumerGroup string) (groupOffsetMap map[string]map[int32]int64) {
@@ -116,6 +126,7 @@ func generateGroupOffsetMap(groupOffsets kafkatools.GroupOffsetSlice, topics []s
 	}
 	return
 }
+
 func setConsumerOffsets(consumer *cluster.Consumer, topics []string, topicOffsets map[string]map[int32]kafkatools.TopicPartitionOffset, groupOffsetMap map[string]map[int32]int64, providedPartition int32, providedOffset int64) {
 	log.Println("Waiting for consumer to join all partitions")
 	log.Println("Make sure there are no other consumers listening for this to work")
