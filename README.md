@@ -1,5 +1,11 @@
 # Kafka Tools - small cli tools for monitoring and managing [Apache Kafka](http://kafka.apache.org/) [![Build Status](https://travis-ci.org/jurriaan/kafkatools.svg?branch=master)](https://travis-ci.org/jurriaan/kafkatools)
 
+## Installation
+
+```bash
+$ go get github.com/jurriaan/kafkatools/...
+```
+
 ## consumer_offsets
 
 CLI tool for fetching kafka consumer group offsets and lag with support for inserting the results into InfluxDB
